@@ -1,0 +1,65 @@
+# Driver to track changes to file /proc/sys/user/max_user_namespaces
+# By Lucas Oakley. Comes with no warranty or guarantees. 
+# 
+# Create driver with:    stap -v -g -p 4 -m  max.ko max.stp
+# Insert driver with:    staprun -L max.ko
+
+global max_user_namespaces_switch = 0; //switch off
+
+
+function output(msg) {
+	printk(1, msg);
+	//printf(msg);
+}
+
+
+
+
+
+// 2813 int proc_dointvec_minmax(struct ctl_table *table, int write,
+// 2814                   void __user *buffer, size_t *lenp, loff_t *ppos)
+// 2815 {
+//
+probe   kernel.function("proc_dointvec_minmax") {
+	if ($table) { 
+		if ($table->procname) {
+		       	entry_name = kernel_string($table->procname);
+			if (entry_name == "max_user_namespaces") { 
+				output(sprintf("LO ---> VAR: 0x%lx ", @var("user_table")));
+				output(sprintf("LO ---> %s hit doing a %s.", entry_name, ($write ? "WRITE" : "READ")));
+				output(sprintf("LO ---> %s: %s (%i) called %s ", ctime(gettimeofday_s()), execname(), pid(), ppfunc()));
+				output(sprintf("LO ---> Regs: rdi: 0x%lx rsi: 0x%lx rdx: 0x%lx rcx: 0x%lx ", register("rdi"), register("rsi"), register("rdx"), register("rcx")));
+				output(sprint_stack(backtrace())); // printbacktrace(); // print call stack
+				max_user_namespaces_switch = 1;
+			}
+		}
+	}
+}
+
+
+
+probe   kernel.function("proc_put_long") {
+	if (max_user_namespaces_switch == 1) {
+		output(sprintf("LO ---> Doing a READ, call probe: buf = 0x%lx val = 0x%lx\n", $buf, $val));
+        	output(sprintf("LO ---> %s: %s (%i) called %s \n", ctime(gettimeofday_s()), execname(), pid(), ppfunc()));
+		output(sprintf("LO ---> Regs: rdi: 0x%lx rsi: 0x%lx rdx: 0x%lx rcx: 0x%lx \n", register("rdi"), register("rsi"), register("rdx"), register("rcx")));
+	        output(sprint_stack(backtrace())); // print_backtrace(); // print call stack
+		max_user_namespaces_switch = 0;
+	}
+}
+
+
+
+
+probe   kernel.function("proc_get_long").return {
+	if (max_user_namespaces_switch == 1) {
+
+		output(sprintf("LO ---> Doing a WRITE, return probe: buf = 0x%lx val = 0x%lx neg = 0x%lx\n", $buf, kernel_long($val), kernel_long($neg)));
+		output(sprintf("LO ---> %s: %s (%i) called %s \n", ctime(gettimeofday_s()), execname(), pid(), ppfunc()));
+	 	output(sprintf("LO ---> Regs: rdi: 0x%lx rsi: 0x%lx rdx: 0x%lx rcx: 0x%lx \n", register("rdi"), register("rsi"), register("rdx"), register("rcx")));
+	        output(sprint_stack(backtrace())); // print_backtrace(); // print call stack
+                max_user_namespaces_switch = 0;
+
+	}
+}
+
